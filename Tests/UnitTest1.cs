@@ -12,6 +12,7 @@ namespace Tests
         public void TestMethod1()
         {
             Trace.WriteLine("test");
+            VerifyLogStrings("test");
         }
     }
 }
