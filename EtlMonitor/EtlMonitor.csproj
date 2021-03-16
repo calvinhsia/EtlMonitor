@@ -57,7 +57,9 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="EventProviders.cs" />
     <Compile Include="MyTraceListener.cs" />
+    <Compile Include="RealTimeEtwListener.cs" />
     <Compile Include="TraceEventNativeMethods.cs" />
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>

@@ -4,15 +4,541 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
     using System;
     using System.Collections.Generic;
     using System.ComponentModel;
+    using System.Diagnostics;
     using System.Diagnostics.Contracts;
     using System.Linq;
     using System.Runtime.InteropServices;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
-    using Microsoft.VisualStudio.Telemetry.Services;
-    using AppInsights = AppInsights::Microsoft.VisualStudio.Telemetry;
+    using System.Xml.Linq;
 
+    //x    using Microsoft.VisualStudio.Telemetry.Services;
+    //x    using AppInsights = AppInsights::Microsoft.VisualStudio.Telemetry;
+    public struct RequiredEventDescriptor
+    {
+        public RequiredEventDescriptor(Guid provider, int level, ulong keywords, bool enableStacks = false)
+        {
+            this.ProviderId = provider;
+            this.Level = level;
+            this.Keywords = keywords;
+            this.EnableStacks = enableStacks;
+        }
+
+        public Guid ProviderId;
+        public int Level;
+        public ulong Keywords;
+        public bool EnableStacks;
+
+        public override string ToString()
+        {
+            return $"{ProviderId} Lev={Level} Kwds={Keywords:x16}, Stks={EnableStacks}";
+        }
+    }
+
+    internal interface IEventRecordReceiver
+    {
+        void ReceiveEvent(EventData eventData);
+    }
+    public interface IEventData
+    {
+        /// <summary>
+        /// Gets the activity identifier for the event. 
+        /// </summary>
+        Guid ActivityId { get; }
+
+        /// <summary>
+        /// Gets the event id. 
+        /// </summary>
+        ushort Id { get; }
+
+        /// <summary>
+        /// Gets the event op code. 
+        /// </summary>
+        ushort OpCode { get; }
+
+        /// <summary>
+        /// Gets the event version
+        /// </summary>
+        ushort Version { get; }
+
+        /// <summary>
+        /// Gets the event process identifier. 
+        /// </summary>
+        int ProcessId { get; }
+
+        /// <summary>
+        /// Gets the event thread identifier.
+        /// </summary>
+        int ThreadId { get; }
+
+        /// <summary>
+        /// Gets the source provider identity.
+        /// </summary>
+        Guid ProviderId { get; }
+
+        /// <summary>
+        /// Gets the timestamp of the event.  Units are in QPC.
+        /// </summary>
+        long TimeStamp { get; }
+
+        /// <summary>
+        /// Gets the user data for the event. 
+        /// </summary>
+        IEventUserData UserData { get; }
+
+        bool HasUserData { get; }
+
+        /// <summary>
+        /// Gets the callstack from extended data if available
+        /// </summary>
+        /// <remarks>If data is not available method will return null</remarks>
+        ulong[] GetCallstackExtendedData();
+    }
+    internal class EventData : IEventData, IEventUserData
+    {
+        internal IntPtr cloneBuffer;
+
+        // This is essentialy the bridge to the NativeCode backing the Event.
+        // It points to a blob of data, and you can use it to fill out
+        // stack traces, exception messages, and other things. 
+        internal unsafe TraceEventNativeMethods.EVENT_RECORD* record;
+
+        internal IntPtr userData;
+
+        internal EventData()
+        {
+        }
+
+        private ulong[] callstackFramesExtendedData;
+
+        ~EventData()
+        {
+            if (cloneBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(cloneBuffer);
+            }
+        }
+
+        public Guid ActivityId
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.ActivityId;
+                }
+            }
+        }
+
+        public bool HasUserData
+        {
+            get
+            {
+                return this.UserDataLength > 0;
+            }
+        }
+
+        public ushort Id
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.Id;
+                }
+            }
+        }
+
+        public ushort OpCode
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.Opcode;
+                }
+            }
+        }
+
+        public ushort Version
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.Version;
+                }
+            }
+        }
+
+        public int ProcessId
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.ProcessId;
+                }
+            }
+        }
+
+        public int ThreadId
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.ThreadId;
+                }
+            }
+        }
+
+        public Guid ProviderId
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->EventHeader.ProviderId;
+                }
+            }
+        }
+
+        public long TimeStamp
+        {
+            get
+            {
+                unsafe
+                {
+                    return this.record->EventHeader.TimeStamp;
+                }
+            }
+        }
+
+        public IEventUserData UserData
+        {
+            get { return this; }
+        }
+
+        public ushort UserDataLength
+        {
+            get
+            {
+                unsafe
+                {
+                    return record->UserDataLength;
+                }
+            }
+        }
+
+        public int ExtendedDataCount
+        {
+            get { unsafe { return record->ExtendedDataCount; } }
+        }
+
+        /// <summary>
+        /// Goes through the ulong stack addresses at 
+        /// <see cref="record->ExtendedData"/> and aggregates them into
+        /// a ulong[] list representing the stack of this Event.
+        /// </summary>
+        /// <returns> a ulong[] representing the stack of this Event.  It's
+        /// in reverse order though.</returns>
+        public unsafe ulong[] GetCallstackExtendedData()
+        {
+            if (cloneBuffer != IntPtr.Zero)
+            {
+                return this.callstackFramesExtendedData;
+            }
+            else
+            {
+                var extendedData = record->ExtendedData;
+                for (int i = 0; i < record->ExtendedDataCount; i++)
+                {
+                    if (extendedData[i].ExtType == TraceEventNativeMethods.EVENT_HEADER_EXT_TYPE_STACK_TRACE64)
+                    {
+
+                        var data = (TraceEventNativeMethods.EVENT_EXTENDED_ITEM_STACK_TRACE64*)(extendedData[i].DataPtr);
+                        int length = (extendedData[i].DataSize - sizeof(ulong)) / sizeof(ulong);
+                        ulong[] frames = new ulong[length];
+
+                        // copy the ulong address in at the offset of data
+                        // to frames.
+                        for (int x = 0; x < length; x++)
+                        {
+                            frames[x] = data->Address[x];
+                        }
+                        return frames;
+
+                    }
+                    else if (extendedData[i].ExtType == TraceEventNativeMethods.EVENT_HEADER_EXT_TYPE_STACK_TRACE32)
+                    {
+                        var data = (TraceEventNativeMethods.EVENT_EXTENDED_ITEM_STACK_TRACE32*)(extendedData[i].DataPtr);
+                        int length = (extendedData[i].DataSize - sizeof(uint)) / sizeof(uint);
+                        ulong[] frames = new ulong[length];
+
+                        for (int x = 0; x < length; x++)
+                        {
+                            frames[x] = data->Address[x];
+                        }
+                        return frames;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+
+        public EventData Clone()
+        {
+            return InternalClone();
+        }
+
+        public int GetStringEndOffset(int offset)
+        {
+            IntPtr data = this.userData;
+
+            while (TraceEventRawReaders.ReadInt16(data, offset) != 0)
+            {
+                offset += 2;
+            }
+
+            offset += 2;
+            return offset;
+        }
+
+        public byte ReadByte(int offset)
+        {
+            return TraceEventRawReaders.ReadByte(this.userData, offset);
+        }
+
+        public byte[] ReadBytes(int offset, ushort length)
+        {
+            return TraceEventRawReaders.ReadBytes(this.userData, offset, length);
+        }
+
+        public Guid ReadGuid(int offset)
+        {
+            return TraceEventRawReaders.ReadGuid(this.userData, offset);
+        }
+
+        public int ReadInt(int offset)
+        {
+            return TraceEventRawReaders.ReadInt32(this.userData, offset);
+        }
+
+        public IntPtr ReadIntPtr(int offset)
+        {
+            return TraceEventRawReaders.ReadIntPtr(this.userData, offset);
+        }
+
+        public long ReadLong(int offset)
+        {
+            return TraceEventRawReaders.ReadInt64(this.userData, offset);
+        }
+
+        public short ReadShort(int offset)
+        {
+            return TraceEventRawReaders.ReadInt16(this.userData, offset);
+        }
+
+        public string ReadString(int offset)
+        {
+            int unused;
+            return TraceEventRawReaders.ReadUnicodeString(this.userData, offset, out unused);
+        }
+
+        public string ReadString(int offset, out int endOffset)
+        {
+            return TraceEventRawReaders.ReadUnicodeString(this.userData, offset, out endOffset);
+        }
+
+        public uint ReadUInt(int offset)
+        {
+            return TraceEventRawReaders.ReadUInt32(this.userData, offset);
+        }
+
+        public ulong ReadULong(int offset)
+        {
+            return TraceEventRawReaders.ReadUInt64(this.userData, offset);
+        }
+
+        public ushort ReadUShort(int offset)
+        {
+            return TraceEventRawReaders.ReadUInt16(this.userData, offset);
+        }
+
+        public double ReadDouble(int offset)
+        {
+            return TraceEventRawReaders.ReadDouble(this.userData, offset);
+        }
+
+        unsafe private static void CopyBlob(IntPtr source, IntPtr destination, int byteCount)
+        {
+            int* sourcePtr = (int*)source;
+            int* destationPtr = (int*)destination;
+            int intCount = byteCount >> 2;
+            while (intCount > 0)
+            {
+                *destationPtr++ = *sourcePtr++;
+                --intCount;
+            }
+        }
+
+        private unsafe EventData InternalClone()
+        {
+            if (record == null)
+            {
+                throw new InvalidOperationException("Attempted to clone event data with no underlying record");
+            }
+
+            var copy = (EventData)this.MemberwiseClone();
+            // Copy the record, and the user date;
+
+            if (record != null)
+            {
+                int userDataLength = (UserDataLength + 3) / 4 * 4;            // DWORD align
+                int totalLength = sizeof(TraceEventNativeMethods.EVENT_RECORD) + userDataLength;
+
+                IntPtr eventRecordBuffer = Marshal.AllocHGlobal(totalLength);
+
+                IntPtr userDataBuffer = (IntPtr)(((byte*)eventRecordBuffer) + sizeof(TraceEventNativeMethods.EVENT_RECORD));
+
+                CopyBlob((IntPtr)record, eventRecordBuffer, sizeof(TraceEventNativeMethods.EVENT_RECORD));
+                CopyBlob(userData, userDataBuffer, userDataLength);
+
+                copy.record = (TraceEventNativeMethods.EVENT_RECORD*)eventRecordBuffer;
+                copy.userData = userDataBuffer;
+                copy.cloneBuffer = eventRecordBuffer;
+
+                // Read the callstack data before cloning event. We will have to read the memory for cloning regardless so
+                // instead of doing a deep clone of data structures we might as well extract the frames here
+                copy.callstackFramesExtendedData = this.GetCallstackExtendedData();
+            }
+
+            return copy;
+        }
+        public unsafe override string ToString()
+        {
+            var result = string.Empty;
+            if (record != null)
+            {
+                result = string.Format("Pid = {0}, OpCode={1} Id = {2}",
+                    record->EventHeader.ProcessId,
+                    record->EventHeader.Opcode,
+                    record->EventHeader.Id
+                    );
+            }
+            return result;
+        }
+    }
+    internal sealed class TraceEventRawReaders
+    {
+        unsafe internal static IntPtr Add(IntPtr pointer, int offset)
+        {
+            return (IntPtr)(((byte*)pointer) + offset);
+        }
+        unsafe internal static Guid ReadGuid(IntPtr pointer, int offset)
+        {
+            return *((Guid*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static double ReadDouble(IntPtr pointer, int offset)
+        {
+            return *((double*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static float ReadSingle(IntPtr pointer, int offset)
+        {
+            return *((float*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static long ReadInt64(IntPtr pointer, int offset)
+        {
+            return *((long*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static int ReadInt32(IntPtr pointer, int offset)
+        {
+            return *((int*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static uint ReadUInt32(IntPtr pointer, int offset)
+        {
+            return *((uint*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static ulong ReadUInt64(IntPtr pointer, int offset)
+        {
+            return *((ulong*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static short ReadInt16(IntPtr pointer, int offset)
+        {
+            return *((short*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static ushort ReadUInt16(IntPtr pointer, int offset)
+        {
+            return *((ushort*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static IntPtr ReadIntPtr(IntPtr pointer, int offset)
+        {
+            return *((IntPtr*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static byte ReadByte(IntPtr pointer, int offset)
+        {
+            return *((byte*)((byte*)pointer.ToPointer() + offset));
+        }
+        unsafe internal static byte[] ReadBytes(IntPtr pointer, int offset, ushort length)
+        {
+            byte[] data = new byte[length];
+            Marshal.Copy(IntPtr.Add(pointer, offset), data, 0, length);
+            return data;
+        }
+        unsafe internal static string ReadUnicodeString(IntPtr pointer, int offset, out int nextOffset)
+        {
+
+            // TODO in debug mode, insure string are inside buffer. 
+            string str = new string((char*)((byte*)pointer.ToPointer() + offset));
+            nextOffset = (offset + ((str.Length * sizeof(char)))) + sizeof(char);
+
+            // TODO investigate this why does this happen?
+#if DEBUG
+            for (int i = 0; i < str.Length; i++)
+            {
+                char c = str[i];
+                if ((c < ' ' || c > '~') && !char.IsWhiteSpace(c))
+                {
+                    str = str.Substring(0, i);
+                    Debug.WriteLine("Warning: truncating " + (str.Length - i).ToString() + " non-ascii name characters: resulting string: " + str);
+                    break;
+                }
+            }
+#endif
+            return str;
+        }
+        unsafe internal static string ReadAsciiString(IntPtr pointer, int offset)
+        {
+            // TODO in debug mode, insure string are inside buffer. 
+            string ret = Marshal.PtrToStringAnsi((IntPtr)(pointer.ToInt64() + offset));
+            return ret;
+        }
+    }
+
+    public interface IEventUserData
+    {
+        ushort UserDataLength { get; }
+        bool HasUserData { get; }
+
+        long ReadLong(int offset);
+        ulong ReadULong(int offset);
+        IntPtr ReadIntPtr(int offset);
+        uint ReadUInt(int offset);
+        short ReadShort(int offset);
+        ushort ReadUShort(int offset);
+        int ReadInt(int offset);
+        string ReadString(int offset);
+        string ReadString(int offset, out int endOffset);
+        Guid ReadGuid(int offset);
+        byte ReadByte(int offset);
+        byte[] ReadBytes(int offset, ushort length);
+        double ReadDouble(int offset);
+        int GetStringEndOffset(int offset);
+    }
 
     internal class RealtimeETWListener
     {
@@ -87,7 +613,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
 
             unsafe
             {
-                LoggerBase.WriteInformation("Stopping Trace Listener");
+                Trace.WriteLine("Stopping Trace Listener");
                 // Flush the trace. 
                 TraceEventNativeMethods.ControlTrace(this.traceHandle, this.listenerName, this.properties, TraceEventNativeMethods.EVENT_TRACE_CONTROL_FLUSH);
 
@@ -186,7 +712,6 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             logFile.LogFileMode |= TraceEventNativeMethods.PROCESS_TRACE_MODE_RAW_TIMESTAMP;
 
             isTracing = true;
-            LoggerBase.WriteDebug("{0}", listenerName);
 
             int err = TraceEventNativeMethods.StartTrace(out this.traceHandle, this.listenerName, properties);
 
@@ -228,7 +753,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
 
         private void ProcessWorker()
         {
-            LoggerBase.WriteDebug("Begin processing trace");
+            Trace.WriteLine("Begin processing trace");
             // This is a blocking call. It will end when the trace is closed or 
             // TraceEventBufferCallback returns false. 
             int error = TraceEventNativeMethods.ProcessTrace(new ulong[] { this.logHandle }, 1, IntPtr.Zero, IntPtr.Zero);
@@ -238,22 +763,22 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
                 throw new Win32Exception(error);
             }
 
-            // check if the VS session is still active which would indicate the ETL session was terminated abnormally
-            var telemetryService = this.serviceProvider.GetService<TelemetryService>();
-            var processService = this.serviceProvider.GetService<ProcessService>();
-            if (processService != null
-                && telemetryService != null
-                && telemetryService.Targets.Any())
-            {
-                var telemetrySession = telemetryService.Targets.First();
-                if (processService.IsProcessRunning(telemetrySession.RootProcess.ProcessId))
-                {
-                    telemetrySession.WasAbnormalTermination = true;
-                    var etlExited = new AppInsights.TelemetryEvent("VS/PerfWatson2/ETLSessionAbnormalShutdown");
-                    etlExited.Properties["VS.PerfWatson2.FailedProcessName"] = telemetrySession.RootProcess.ProcessName;
-                    AISessionHelper.PostEvent(etlExited);
-                }
-            }
+            //// check if the VS session is still active which would indicate the ETL session was terminated abnormally
+            //var telemetryService = this.serviceProvider.GetService<TelemetryService>();
+            //var processService = this.serviceProvider.GetService<ProcessService>();
+            //if (processService != null
+            //    && telemetryService != null
+            //    && telemetryService.Targets.Any())
+            //{
+            //    var telemetrySession = telemetryService.Targets.First();
+            //    if (processService.IsProcessRunning(telemetrySession.RootProcess.ProcessId))
+            //    {
+            //        telemetrySession.WasAbnormalTermination = true;
+            //        var etlExited = new AppInsights.TelemetryEvent("VS/PerfWatson2/ETLSessionAbnormalShutdown");
+            //        etlExited.Properties["VS.PerfWatson2.FailedProcessName"] = telemetrySession.RootProcess.ProcessName;
+            //        AISessionHelper.PostEvent(etlExited);
+            //    }
+            //}
         }
 
         [AllowReversePInvokeCalls]
@@ -264,41 +789,40 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
 
         private void UpdateIsCollectionDisabled()
         {
-            if (this.serviceProvider != null)
-            {
-                ITelemetryCollectionPolicy telemetryCollectionPolicy = this.serviceProvider.GetService<ITelemetryCollectionPolicy>();
-                if (telemetryCollectionPolicy != null && this.isTracing)
-                {
-                    if (telemetryCollectionPolicy.ShouldStopCollection)
-                    {
-                        LoggerBase.WriteInformation("Stopping Collection");
-                        checkIfUpdateIsDisabled.Change(Timeout.Infinite, Timeout.Infinite);
-                        this.End();
+            //if (this.serviceProvider != null)
+            //{
+            //    if (this.isTracing)
+            //    {
+            //        if (telemetryCollectionPolicy.ShouldStopCollection)
+            //        {
+            //            Trace.WriteLine("Stopping Collection");
+            //            checkIfUpdateIsDisabled.Change(Timeout.Infinite, Timeout.Infinite);
+            //            this.End();
 
-                        // downcast to see if we have concrete types needed to log reason for disabling collection
-                        var telemetryCollectionPolicyImpl = telemetryCollectionPolicy as TelemetryCollectionPolicy;
-                        var telemetryService = serviceProvider as TelemetryService;
-                        if (telemetryCollectionPolicyImpl != null && telemetryService != null
-                            && telemetryService.Targets != null && telemetryService.Targets.Any())
-                        {
-                            var defaultSession = telemetryService.Targets.First();
-                            var context = defaultSession.GetService<SessionContextService>();
-                            if (context != null && !context.Disposed)
-                            {
-                                if (telemetryCollectionPolicyImpl.IsDebuggerAttached ?? false)
-                                {
-                                    context.SetSystemValue("IsDebuggerAttached", "true");
-                                }
+            //            // downcast to see if we have concrete types needed to log reason for disabling collection
+            //            var telemetryCollectionPolicyImpl = telemetryCollectionPolicy as TelemetryCollectionPolicy;
+            //            var telemetryService = serviceProvider as TelemetryService;
+            //            if (telemetryCollectionPolicyImpl != null && telemetryService != null
+            //                && telemetryService.Targets != null && telemetryService.Targets.Any())
+            //            {
+            //                var defaultSession = telemetryService.Targets.First();
+            //                var context = defaultSession.GetService<SessionContextService>();
+            //                if (context != null && !context.Disposed)
+            //                {
+            //                    if (telemetryCollectionPolicyImpl.IsDebuggerAttached ?? false)
+            //                    {
+            //                        context.SetSystemValue("IsDebuggerAttached", "true");
+            //                    }
 
-                                if (telemetryCollectionPolicyImpl.HasReachedMaximumTelemetryDatabaseSize ?? false)
-                                {
-                                    context.SetSystemValue("IsMaxFileSize", "true");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            //                    if (telemetryCollectionPolicyImpl.HasReachedMaximumTelemetryDatabaseSize ?? false)
+            //                    {
+            //                        context.SetSystemValue("IsMaxFileSize", "true");
+            //                    }
+            //                }
+            //            }
+            //        }
+            //    }
+            //}
         }
 
         [AllowReversePInvokeCalls]
