@@ -9,7 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace EtlMonitor
+namespace Utility
 {
     public class MyTraceListenerWriteLineArgs : EventArgs
     {

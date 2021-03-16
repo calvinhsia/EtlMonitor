@@ -7,6 +7,11 @@
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800">
     <Grid>
-        
+
+        <StackPanel Orientation="Horizontal">
+
+        </StackPanel>
+        <TextBox Grid.Row="1" Name="_txtStatus" IsReadOnly="True" 
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsUndoEnabled="False" Height="80"/>
     </Grid>
 </Window>
