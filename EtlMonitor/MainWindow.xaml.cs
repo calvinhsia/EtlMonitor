@@ -24,7 +24,6 @@ namespace EtlMonitor
         public MainWindow()
         {
             InitializeComponent();
-            Trace.Listeners.Add(new MyTraceListener());
             this.Loaded += MainWindow_Loaded;
         }
 

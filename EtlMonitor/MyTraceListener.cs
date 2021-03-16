@@ -40,12 +40,13 @@ namespace EtlMonitor
                     this.lstLoggedStrings.Add(e.Line);
                 };
             }
+            Trace.Listeners.Add(this);
         }
         public override void WriteLine(string str)
         {
             if (!IsInTraceListener)
             {
-                IsInTraceListener = true;
+                IsInTraceListener = true; // prevent recursion (e.g. from Debug.WriteLine)
                 var dt = string.Format("[{0}],",
                      DateTime.Now.ToString("hh:mm:ss:fff")
                      ) + $"{Thread.CurrentThread.ManagedThreadId,2} ";
