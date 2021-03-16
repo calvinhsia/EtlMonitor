@@ -21,7 +21,6 @@ namespace Utility
     }
     public class MyTraceListener : TextWriterTraceListener, IDisposable
     {
-        private readonly string LogFileName;
         private readonly MyTextWriterTraceListenerOptions options;
         public List<string> _lstLoggedStrings;
 
@@ -59,7 +58,6 @@ namespace Utility
             {
                 LogFileName = System.Environment.ExpandEnvironmentVariables(@"%USERPROFILE%\Desktop\TestOutput.txt");
             }
-            this.LogFileName = LogFileName;
             this.options = options;
             _lstLoggedStrings = new List<string>();
             MyTraceListenerOnWriteLine += (o, e) =>

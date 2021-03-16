@@ -522,13 +522,13 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
         {
             public Guid EventGuid;
             public byte Type;
-            byte Reserved1;
-            byte Reserved2;
-            byte Reserved3;
-            byte Reserved4;
-            byte Reserved5;
-            byte Reserved6;
-            byte Reserved7;
+            readonly byte Reserved1;
+            readonly byte Reserved2;
+            readonly byte Reserved3;
+            readonly byte Reserved4;
+            readonly byte Reserved5;
+            readonly byte Reserved6;
+            readonly byte Reserved7;
         }
 
         [DllImport("KernelTraceControl.dll", CharSet = CharSet.Unicode), SuppressUnmanagedCodeSecurityAttribute]
@@ -705,8 +705,10 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
                 throw new Win32Exception();
             GC.KeepAlive(process);                      // TODO get on SafeHandles. 
 
-            TOKEN_PRIVILEGES privileges = new TOKEN_PRIVILEGES();
-            privileges.PrivilegeCount = 1;
+            TOKEN_PRIVILEGES privileges = new TOKEN_PRIVILEGES
+            {
+                PrivilegeCount = 1
+            };
             privileges.Luid.LowPart = SE_SYSTEM_PROFILE_PRIVILEGE;
             privileges.Attributes = SE_PRIVILEGE_ENABLED;
 
@@ -723,13 +725,16 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
                 return true;
 
             Process process = Process.GetCurrentProcess();
+#pragma warning disable IDE0059 // Unnecessary assignment of a value
             IntPtr tokenHandle = IntPtr.Zero;
+#pragma warning restore IDE0059 // Unnecessary assignment of a value
             if (!OpenProcessToken(process.Handle, TOKEN_QUERY, out tokenHandle))
                 return null;
 
             int tokenIsElevated = 0;
-            int retSize;
-            bool success = GetTokenInformation(tokenHandle, TOKEN_INFORMATION_CLASS.TokenElevation, (IntPtr)(&tokenIsElevated), 4, out retSize);
+#pragma warning disable IDE0059 // Unnecessary assignment of a value
+            bool success = GetTokenInformation(tokenHandle, TOKEN_INFORMATION_CLASS.TokenElevation, (IntPtr)(&tokenIsElevated), 4, out int retSize);
+#pragma warning restore IDE0059 // Unnecessary assignment of a value
             CloseHandle(tokenHandle);
             if (!success)
                 return null;

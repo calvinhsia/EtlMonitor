@@ -21,6 +21,7 @@ namespace Tests
               {
                   TestContext.WriteLine(e.MessageLine);
               };
+            Trace.WriteLine($"Starting test {TestContext.TestName}");
         }
         [TestCleanup]
         public void TestCleanup()
