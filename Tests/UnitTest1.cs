@@ -1,10 +1,12 @@
 ﻿using EtlMonitor;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Linq;
 using System.Diagnostics;
 using Microsoft.VisualStudio.Telemetry.ETW;
 using Microsoft.Performance.ResponseTime;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Tests
 {
@@ -38,16 +40,33 @@ namespace Tests
                 enableStacks: true);
 
             this.EtwListener.Begin();
-            await Task.Delay(TimeSpan.FromSeconds(3));
-            VerifyLogStrings("test");
+            await Task.Delay(TimeSpan.FromSeconds(5));
             this.EtwListener.End();
+            Trace.WriteLine("Tracing stopped");
+            var res = from evd in eventReceiver.lstEvents
+                    group evd by evd.ProcessId into grp
+                    select new
+                    {
+                        PID = grp.Key,
+                        Proc = Process.GetProcessById(grp.Key).ProcessName,
+                        Cnt=grp.Count(),
+                    };
+            foreach (var dat in res)
+            {
+                Trace.WriteLine($" {dat.PID} {dat.Cnt}  {dat.Proc}");
+            }
+            VerifyLogStrings("test");
         }
     }
     internal class EventReceiver : IEventRecordReceiver
     {
+        public List<EventData> lstEvents = new List<EventData>();
         public void ReceiveEvent(EventData eventData)
         {
-            Trace.WriteLine($"Received event{eventData}");
+            lstEvents.Add(eventData.Clone()); // to persist, must make a copy so it doesn't get overwritten by next event
+            var proc = Process.GetProcessById(eventData.ProcessId);
+            var id = (EventProviders.ClrProviderEventIds)eventData.Id;
+            Trace.WriteLine($"Received event {proc.ProcessName} {id} {eventData}");
         }
     }
 }

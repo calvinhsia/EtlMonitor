@@ -626,7 +626,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
                 // the Join will timeout after 60 seconds just in case something's gone wrong to prevent deadlock.
                 if (waitForThreads)
                 {
-                    processWorkerThread.Join(TimeSpan.FromSeconds(60));
+                    processWorkerThread.Join(TimeSpan.FromSeconds(20));
                 }
                 processWorkerThread = null;
 
