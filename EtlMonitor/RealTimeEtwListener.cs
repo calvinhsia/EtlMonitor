@@ -589,20 +589,18 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             TraceEventNativeMethods.ENABLE_TRACE_PARAMETERS traceParams = new TraceEventNativeMethods.ENABLE_TRACE_PARAMETERS();
             traceParams.Version = TraceEventNativeMethods.ENABLE_TRACE_PARAMETERS_VERSION;
             traceParams.EnableProperty = settings.EnableStacks ? TraceEventNativeMethods.EVENT_ENABLE_PROPERTY_STACK_TRACE : 0;
-            var ProcToFilterTo = Process.GetProcessesByName("devenv").Skip(1).First();
-            //            PidToFilterTo = 0;
-            Trace.WriteLine($"Filtering to Pid {ProcToFilterTo.Id} {ProcToFilterTo.MainWindowTitle}");
             EVENT_FILTER_DESCRIPTOR* pFilterDesc = null;
-            if (ProcToFilterTo != null)
+            if (settings.PidToFilter != 0)
             {
-                traceParams.FilterDescCount = 1;
+                var nProcIds = 1;
+                traceParams.FilterDescCount = (uint)nProcIds; // 1 filter item
                 pFilterDesc = (EVENT_FILTER_DESCRIPTOR*)Marshal.AllocCoTaskMem(sizeof(EVENT_FILTER_DESCRIPTOR));
-                var parrPid = (int*)Marshal.AllocCoTaskMem(sizeof(int));
-                *parrPid = ProcToFilterTo.Id;
+                var parrPid = (int*)Marshal.AllocCoTaskMem((nProcIds * sizeof(int))); // 1 PID
+                *parrPid = settings.PidToFilter;
                 pFilterDesc->Ptr = (byte*)parrPid;
 
-                pFilterDesc->Size = 8;
-                pFilterDesc->Type = (int)EVENT_FILTER_TYPE_PID;
+                pFilterDesc->Size = (nProcIds * sizeof(int));
+                pFilterDesc->Type = EVENT_FILTER_TYPE_PID;
                 traceParams.EnableFilterDesc = pFilterDesc;
             }
 
@@ -673,7 +671,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             processWorkerThread.Start();
         }
 
-        internal void EnableProvider(Guid providerId, int level, ulong matchAnyKeyword, ulong matchAllKeywords, bool enableStacks)
+        internal void EnableProvider(Guid providerId, int level, ulong matchAnyKeyword, ulong matchAllKeywords, bool enableStacks, int PidToFilter = 0)
         {
             ProviderSettings settings = new ProviderSettings()
             {
@@ -681,7 +679,8 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
                 Level = level,
                 MatchAny = matchAnyKeyword,
                 MatchAll = matchAllKeywords,
-                EnableStacks = enableStacks
+                EnableStacks = enableStacks,
+                PidToFilter = PidToFilter
             };
 
             if (isTracing)
@@ -865,6 +864,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             public ulong MatchAny;
             public ulong MatchAll;
             public bool EnableStacks;
+            public int PidToFilter; // 0 means don't filter, else Pid of Devenv
         }
     }
 }

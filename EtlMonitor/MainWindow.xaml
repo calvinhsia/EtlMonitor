@@ -7,11 +7,19 @@
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800">
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal">
+        <StackPanel Orientation="Vertical">
+            <StackPanel Orientation="Horizontal">
+                <CheckBox Content="FilterToPid" IsChecked="{Binding IsFilterToPid}"/>
+                <Button x:Name="btnGo" Content="_Go" Width="75"/>
+            </StackPanel>
 
         </StackPanel>
         <TextBox Grid.Row="1" Name="_txtStatus" IsReadOnly="True" 
-                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsUndoEnabled="False" Height="80"/>
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" IsUndoEnabled="False" />
     </Grid>
 </Window>

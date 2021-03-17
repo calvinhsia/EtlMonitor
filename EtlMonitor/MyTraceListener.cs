@@ -117,33 +117,33 @@ namespace Utility
                         }
                     });
                 }
-            }
-            else
-            {
-                MyTraceListenerOnWriteLine += (o, e) =>
-                      {
-                          try
-                          {
-                              if (this.taskOutput != null)
-                              {
-                                  this.taskOutput.Wait();
-                              }
-                              if (!this.taskOutput.IsCompleted) // faulted?
-                              {
-                                  Trace.WriteLine(("Output Task faulted"));
-                              }
-                              this.taskOutput = Task.Run(async () =>
-                              {
-                                  await OutputToLogFileWithRetryAsync(() =>
-                                  {
-                                      File.AppendAllText(LogFileName, e.MessageLine + Environment.NewLine);
-                                  });
-                              });
-                          }
-                          catch (OperationCanceledException)
-                          {
-                          }
-                      };
+                else
+                {
+                    MyTraceListenerOnWriteLine += (o, e) =>
+                    {
+                        try
+                        {
+                            if (this.taskOutput != null)
+                            {
+                                this.taskOutput.Wait();
+                                if (!this.taskOutput.IsCompleted) // faulted?
+                                {
+                                    Trace.WriteLine(("Output Task faulted"));
+                                }
+                            }
+                            this.taskOutput = Task.Run(async () =>
+                            {
+                                await OutputToLogFileWithRetryAsync(() =>
+                                {
+                                    File.AppendAllText(LogFileName, e.MessageLine + Environment.NewLine);
+                                });
+                            });
+                        }
+                        catch (OperationCanceledException)
+                        {
+                        }
+                    };
+                }
             }
         }
 

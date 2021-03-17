@@ -16,57 +16,55 @@ namespace Tests
         private RealtimeETWListener EtwListener;
 
         [TestMethod]
-        public async Task TestMethod1()
+        public async Task TestEtwNoFilter()
         {
-            Trace.WriteLine("test");
+            var cnt = await DoItAsync(Filter: false);
+            Assert.IsTrue(cnt > 1, "Expecting many managed processes");
+        }
+        [TestMethod]
+        public async Task TestEtwFilter()
+        {
+            var cnt = await DoItAsync(Filter: true);
+            Assert.AreEqual(cnt, 1, $"Expected 1 managed process. Got {cnt}");
+        }
+
+        private async Task<int> DoItAsync(bool Filter)
+        {
             var eventReceiver = new EventReceiver();
             this.EtwListener = new RealtimeETWListener("MyListener", eventReceiver);
-            //// listen to GC etw provider
-            //service.AddRequiredEvent(new RequiredEventDescriptor(EventProviders.ClrProviderGuid,
-            //    (int)TelemetryService.TraceEventLevel.Informational, (int)(EventProviders.ClrProviderKeywords.GC), enableStacks: false));
-            //var d = new RequiredEventDescriptor()
-            //{
-            //    ProviderId = EventProviders.ClrProviderGuid,
-            //    Level = 4,
-            //    Keywords = EventProviders.ClrProviderKeywords.GC,
-            //    EnableStacks=true
-            //};
+            Process ProcToFilterTo = null;
+            if (Filter)
+            {
+                ProcToFilterTo = Process.GetProcessesByName("devenv").First();
+            }
+            Trace.WriteLine($"Filtering to Pid {ProcToFilterTo?.Id} {ProcToFilterTo?.MainWindowTitle}");
 
             this.EtwListener.EnableProvider(
-                EventProviders.ClrProviderGuid, 
-                level: 4, 
+                EventProviders.ClrProviderGuid,
+                level: 4,
                 matchAnyKeyword: (ulong)EventProviders.ClrProviderKeywords.GC,
-                matchAllKeywords:0,
-                enableStacks: true);
+                matchAllKeywords: 0,
+                enableStacks: true,
+                PidToFilter: ProcToFilterTo == null ? 0 : ProcToFilterTo.Id
+                );
 
             this.EtwListener.Begin();
-            await Task.Delay(TimeSpan.FromSeconds(5));
+            await Task.Delay(TimeSpan.FromSeconds(10));
             this.EtwListener.End();
             Trace.WriteLine("Tracing stopped");
             var res = from evd in eventReceiver.lstEvents
-                    group evd by evd.ProcessId into grp
-                    select new
-                    {
-                        PID = grp.Key,
-                        Proc = Process.GetProcessById(grp.Key).ProcessName,
-                        Cnt=grp.Count(),
-                    };
+                      group evd by evd.ProcessId into grp
+                      select new
+                      {
+                          PID = grp.Key,
+                          Proc = Process.GetProcessById(grp.Key).ProcessName,
+                          Cnt = grp.Count(),
+                      };
             foreach (var dat in res)
             {
-                Trace.WriteLine($" {dat.PID} {dat.Cnt}  {dat.Proc}");
+                Trace.WriteLine($" PID={dat.PID}  #Ev={dat.Cnt}  {dat.Proc}");
             }
-            VerifyLogStrings("test");
-        }
-    }
-    internal class EventReceiver : IEventRecordReceiver
-    {
-        public List<EventData> lstEvents = new List<EventData>();
-        public void ReceiveEvent(EventData eventData)
-        {
-            lstEvents.Add(eventData.Clone()); // to persist, must make a copy so it doesn't get overwritten by next event
-            var proc = Process.GetProcessById(eventData.ProcessId);
-            var id = (EventProviders.ClrProviderEventIds)eventData.Id;
-            Trace.WriteLine($"Received event {proc.ProcessName} {id} {eventData}");
+            return res.Count();
         }
     }
 }
