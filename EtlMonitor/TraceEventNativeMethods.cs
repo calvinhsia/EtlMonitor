@@ -483,7 +483,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
         // Values for ENABLE_TRACE_PARAMETERS.Version
         internal const uint ENABLE_TRACE_PARAMETERS_VERSION = 2;
         // C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0\shared\evntprov.h
-        internal const uint EVENT_FILTER_TYPE_PID = 4;
+        internal const int EVENT_FILTER_TYPE_PID = unchecked((int)0x80000004);
         // Values for ENABLE_TRACE_PARAMETERS.EnableProperty
         internal const uint EVENT_ENABLE_PROPERTY_SID = 0x00000001;
         internal const uint EVENT_ENABLE_PROPERTY_TS_ID = 0x00000002;

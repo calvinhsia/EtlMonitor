@@ -593,7 +593,6 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             //            PidToFilterTo = 0;
             Trace.WriteLine($"Filtering to Pid {ProcToFilterTo.Id} {ProcToFilterTo.MainWindowTitle}");
             EVENT_FILTER_DESCRIPTOR* pFilterDesc = null;
-//            Span<int> nums = stackalloc int[10];
             if (ProcToFilterTo != null)
             {
                 traceParams.FilterDescCount = 1;
