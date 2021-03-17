@@ -12,6 +12,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
     using System.Threading;
     using System.Threading.Tasks;
     using System.Xml.Linq;
+    using static Microsoft.VisualStudio.Telemetry.ETW.TraceEventNativeMethods;
 
     //x    using Microsoft.VisualStudio.Telemetry.Services;
     //x    using AppInsights = AppInsights::Microsoft.VisualStudio.Telemetry;
@@ -588,6 +589,23 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             TraceEventNativeMethods.ENABLE_TRACE_PARAMETERS traceParams = new TraceEventNativeMethods.ENABLE_TRACE_PARAMETERS();
             traceParams.Version = TraceEventNativeMethods.ENABLE_TRACE_PARAMETERS_VERSION;
             traceParams.EnableProperty = settings.EnableStacks ? TraceEventNativeMethods.EVENT_ENABLE_PROPERTY_STACK_TRACE : 0;
+            var ProcToFilterTo = Process.GetProcessesByName("devenv").Skip(1).First();
+            //            PidToFilterTo = 0;
+            Trace.WriteLine($"Filtering to Pid {ProcToFilterTo.Id} {ProcToFilterTo.MainWindowTitle}");
+            EVENT_FILTER_DESCRIPTOR* pFilterDesc = null;
+//            Span<int> nums = stackalloc int[10];
+            if (ProcToFilterTo != null)
+            {
+                traceParams.FilterDescCount = 1;
+                pFilterDesc = (EVENT_FILTER_DESCRIPTOR*)Marshal.AllocCoTaskMem(sizeof(EVENT_FILTER_DESCRIPTOR));
+                var parrPid = (int*)Marshal.AllocCoTaskMem(sizeof(int));
+                *parrPid = ProcToFilterTo.Id;
+                pFilterDesc->Ptr = (byte*)parrPid;
+
+                pFilterDesc->Size = 8;
+                pFilterDesc->Type = (int)EVENT_FILTER_TYPE_PID;
+                traceParams.EnableFilterDesc = pFilterDesc;
+            }
 
             int err = TraceEventNativeMethods.EnableTraceEx2(
                 this.traceHandle,
@@ -596,8 +614,13 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
                 (byte)settings.Level,
                 settings.MatchAny,
                 settings.MatchAll,
-                0, ref traceParams);
-
+                Timeout: 0,
+                EnableParameters: ref traceParams);
+            if (pFilterDesc != null)
+            {
+                Marshal.FreeCoTaskMem((IntPtr)pFilterDesc->Ptr);
+                Marshal.FreeCoTaskMem((IntPtr)pFilterDesc);
+            }
             if (err != 0)
             {
                 throw new Win32Exception(err);

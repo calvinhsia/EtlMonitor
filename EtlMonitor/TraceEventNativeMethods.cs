@@ -481,8 +481,9 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             [In] ref ENABLE_TRACE_PARAMETERS EnableParameters);
 
         // Values for ENABLE_TRACE_PARAMETERS.Version
-        internal const uint ENABLE_TRACE_PARAMETERS_VERSION = 1;
-
+        internal const uint ENABLE_TRACE_PARAMETERS_VERSION = 2;
+        // C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0\shared\evntprov.h
+        internal const uint EVENT_FILTER_TYPE_PID = 4;
         // Values for ENABLE_TRACE_PARAMETERS.EnableProperty
         internal const uint EVENT_ENABLE_PROPERTY_SID = 0x00000001;
         internal const uint EVENT_ENABLE_PROPERTY_TS_ID = 0x00000002;
@@ -500,6 +501,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             public uint ControlFlags;
             public Guid SourceId;
             public EVENT_FILTER_DESCRIPTOR* EnableFilterDesc;
+            public uint FilterDescCount;
         };
 
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode), SuppressUnmanagedCodeSecurityAttribute]
