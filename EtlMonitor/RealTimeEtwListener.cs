@@ -857,7 +857,7 @@ namespace Microsoft.VisualStudio.Telemetry.ETW
             this.receiver.ReceiveEvent(rawDataSingleton);
         }
 
-        private class ProviderSettings
+        internal class ProviderSettings
         {
             public Guid Guid;
             public int Level;
